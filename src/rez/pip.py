@@ -7,26 +7,33 @@ from rez.vendor.distlib.database import DistributionPath
 from rez.vendor.distlib.markers import interpret
 from rez.vendor.distlib.util import parse_name_and_version
 from rez.vendor.enum.enum import Enum
+from rez.vendor.packaging.version import Version as PackagingVersion
+from rez.vendor.packaging.specifiers import Specifier
 from rez.vendor.six.six import StringIO
 from rez.resolved_context import ResolvedContext
 from rez.utils.execution import Popen
 from rez.utils.pip import get_rez_requirements, pip_to_rez_package_name, \
     pip_to_rez_version
-from rez.utils.logging_ import print_debug, print_info, print_warning
+from rez.utils.logging_ import print_debug, print_info, print_error, \
+    print_warning
 from rez.exceptions import BuildError, PackageFamilyNotFoundError, \
     PackageNotFoundError, RezSystemError, convert_errors
 from rez.package_maker import make_package
 from rez.config import config
 from rez.utils.platform_ import platform_
 
-from tempfile import mkdtemp
+import os
 from pipes import quote
 from pprint import pformat
-import subprocess
-import os.path
+import re
 import shutil
+import subprocess
 import sys
-import os
+from tempfile import mkdtemp
+from textwrap import dedent
+
+
+PIP_SPECIFIER = Specifier(">=19")  # rez pip only compatible with pip>=19
 
 
 class InstallMode(Enum):
@@ -79,33 +86,71 @@ def find_pip(pip_version=None, python_version=None):
     """
     py_exe = None
     context = None
+    found_pip_version = None
+    valid_found = False
 
-    py_exe, pip_version, context = find_pip_from_context(
-        python_version,
-        pip_version=pip_version
-    )
+    for version in [pip_version, "latest"]:
+        try:
+            py_exe, found_pip_version, context = find_pip_from_context(
+                python_version, pip_version=version
+            )
+            valid_found = _check_found(py_exe, found_pip_version)
+            if valid_found:
+                break
+        except BuildError as error:
+            print_warning(str(error))
 
-    if not py_exe:
-        py_exe, pip_version, context = find_pip_from_context(
-            python_version,
-            pip_version=pip_version or "latest"
-        )
-
-    if not py_exe:
+    if not valid_found:
         import pip
-        pip_version = pip.__version__
-        py_exe = sys.executable
-        print_warning(
-            "Found no pip in python and pip package; "
-            "falling back to pip installed in rez own virtualenv (version %s)",
-            pip_version
-        )
 
-    pip_major = pip_version.split('.')[0]
-    if int(pip_major) < 19:
-        raise RezSystemError("pip >= 19 is required! Please update your pip.")
+        found_pip_version = pip.__version__
+        py_exe = sys.executable
+        print_warning("Found no pip in any python and/or pip packages!")
+        print_warning("Falling back to pip installed in rez own virtualenv:")
+        logging_arguments = (
+            ("pip", found_pip_version, pip.__file__),
+            ("python", ".".join(map(str, sys.version_info[:3])), py_exe),
+        )
+        for warn_args in logging_arguments:
+            print_warning("%10s: %s (%s)", *warn_args)
+
+    if not _check_found(py_exe, found_pip_version, log_invalid=False):
+        message = "pip{specifier} is required! Please update your pip."
+        raise RezSystemError(message.format(specifier=PIP_SPECIFIER))
 
     return py_exe, context
+
+
+def find_python_in_context(context):
+    """Find Python executable within the given context.
+
+    Args:
+        context (ResolvedContext): Resolved context with Python and pip.
+        name (str): Name of the package for Python instead of "python".
+        default (str): Force a particular fallback path for Python executable.
+
+    Returns:
+        str or None: Path to Python executable, if any.
+    """
+
+    # Create a copy of the context with systems paths removed, so we don't
+    # accidentally find a system python install.
+    #
+    context = context.copy()
+    context.append_sys_path = False  # GitHub nerdvegas/rez/issue/826
+
+    python_package = context.get_resolved_package("python")
+    assert python_package
+
+    # look for (eg) python3.7, then python3, then python
+    name_template = "python{}"
+    for trimmed_version in map(python_package.version.trim, [2, 1, 0]):
+        exe_name = name_template.format(trimmed_version)
+        py_exe_path = context.which(exe_name)
+        if py_exe_path:
+            return py_exe_path
+
+    return None
 
 
 def find_pip_from_context(python_version, pip_version=None):
@@ -155,12 +200,7 @@ def find_pip_from_context(python_version, pip_version=None):
         print_debug("No rez package called %s found", target)
         return None, None, None
 
-    py_exe_name = "python"
-    if platform_.name != "windows":
-        # Python < 2 on Windows doesn't have versionned executable.
-        py_exe_name += str(python_major_minor_ver.trim(1))
-
-    py_exe = context.which(py_exe_name)
+    py_exe = find_python_in_context(context)
 
     proc = context.execute_command(
         # -E and -s are used to isolate the environment as much as possible.
@@ -183,7 +223,7 @@ def find_pip_from_context(python_version, pip_version=None):
     variant = context.get_resolved_package(target)
     package = variant.parent
     print_info(
-        "Found pip-%s inside %s. Will use it with %s",
+        "Found pip-%s inside %s. Will use it via %s",
         pip_version,
         package.uri,
         py_exe
@@ -277,6 +317,25 @@ def pip_install_package(source_name, pip_version=None, python_version=None,
     distribution_path = DistributionPath([targetpath])
     distributions = list(distribution_path.get_distributions())
     dist_names = [x.name for x in distributions]
+
+    def log_append_pkg_variants(pkg_maker):
+        template = '{action} [{package.qualified_name}] {package.uri}{suffix}'
+        actions_variants = [
+            (
+                print_info, 'Installed',
+                installed_variants, pkg_maker.installed_variants or [],
+            ),
+            (
+                print_debug, 'Skipped',
+                skipped_variants, pkg_maker.skipped_variants or [],
+            ),
+        ]
+        for print_, action, variants, pkg_variants in actions_variants:
+            for variant in pkg_variants:
+                variants.append(variant)
+                package = variant.parent
+                suffix = (' (%s)' % variant.subpath) if variant.subpath else ''
+                print_(template.format(**locals()))
 
     # get list of package and dependencies
     for distribution in distributions:
@@ -377,11 +436,43 @@ def pip_install_package(source_name, pip_version=None, python_version=None,
             pkg.from_pip = True
             pkg.is_pure_python = metadata["is_pure_python"]
 
-        installed_variants.extend(pkg.installed_variants or [])
-        skipped_variants.extend(pkg.skipped_variants or [])
+            distribution_metadata = distribution.metadata.todict()
+
+            help_ = []
+
+            if "home_page" in distribution_metadata:
+                help_.append(["Home Page", distribution_metadata["home_page"]])
+
+            if "download_url" in distribution_metadata:
+                help_.append(["Source Code", distribution_metadata["download_url"]])
+
+            if help_:
+                pkg.help = help_
+
+            if "author" in distribution_metadata:
+                author = distribution_metadata["author"]
+
+                if "author_email" in distribution_metadata:
+                    author += ' ' + distribution_metadata["author_email"]
+
+                pkg.authors = [author]
+
+        log_append_pkg_variants(pkg)
 
     # cleanup
     shutil.rmtree(targetpath)
+
+    # print summary
+    #
+    if installed_variants:
+        print_info("%d packages were installed.", len(installed_variants))
+    else:
+        print_warning("NO packages were installed.")
+    if skipped_variants:
+        print_warning(
+            "%d packages were already installed.",
+            len(skipped_variants),
+        )
 
     return installed_variants, skipped_variants
 
@@ -403,9 +494,6 @@ def _get_distribution_files_mapping(distribution, targetdir):
         * key: Path of pip installed file, relative to `targetdir`;
         * value: Relative path to install into rez package.
     """
-    bin_prefix = os.path.join(os.pardir, os.pardir, 'bin') + os.sep
-    lib_py_prefix = os.path.join(os.pardir, os.pardir, 'lib', 'python') + os.sep
-
     def get_mapping(rel_src):
         topdir = rel_src.split(os.sep)[0]
 
@@ -415,27 +503,49 @@ def _get_distribution_files_mapping(distribution, targetdir):
         if topdir.endswith(".dist-info"):
             return (rel_src, rel_src)
 
-        # RECORD lists bin files as being in ../../bin/, when in fact they are
-        # in ./bin. This also happens to match rez package structure, so here
-        # src and dest are same rel path.
-        #
-        if rel_src.startswith(bin_prefix):
-            adjusted_rel_src = os.path.join("bin", rel_src[len(bin_prefix):])
-            return (adjusted_rel_src, adjusted_rel_src)
-
-        # Rarely, some distributions report an installed file as being in
-        # ../../lib/python/<pkg-name>/...
-        #
-        if rel_src.startswith(lib_py_prefix):
-            adjusted_rel_src = rel_src[len(lib_py_prefix):]
-            rel_dest = os.path.join("python", adjusted_rel_src)
-            return (adjusted_rel_src, rel_dest)
-
-        # A case we don't know how to deal with yet
+        # Remapping of other installed files according to manifest
         if topdir == os.pardir:
-            raise RuntimeError(
-                "Don't know what to do with source file %r, please file a ticket",
-                rel_src
+            for remap in config.pip_install_remaps:
+                path = remap['record_path']
+                if re.search(path, rel_src):
+                    pip_subpath = re.sub(path, remap['pip_install'], rel_src)
+                    rez_subpath = re.sub(path, remap['rez_install'], rel_src)
+                    return (pip_subpath, rez_subpath)
+
+            tokenised_path = rel_src.replace(os.pardir, '{pardir}')
+            tokenised_path = tokenised_path.replace(os.sep, '{sep}')
+            dist_record = '{dist.name}-{dist.version}.dist-info{os.sep}RECORD'
+            dist_record = dist_record.format(dist=distribution, os=os)
+
+            try_this_message = r"""
+            Unknown source file in {0}! '{1}'
+
+            To resolve, try:
+
+            1. Manually install the pip package using 'pip install --target'
+               to a temporary location.
+            2. See where '{1}'
+               actually got installed to by pip, RELATIVE to --target location
+            3. Create a new rule to 'pip_install_remaps' configuration like:
+
+                {{
+                    "record_path": r"{2}",
+                    "pip_install": r"<RELATIVE path pip installed to in 2.>",
+                    "rez_install": r"<DESTINATION sub-path in rez package>",
+                }}
+
+            4. Try rez-pip install again.
+
+            If path remapping is not enough, consider submitting a new issue
+            via https://github.com/nerdvegas/rez/issues/new
+            """.format(dist_record, rel_src, tokenised_path)
+            print_error(dedent(try_this_message).lstrip())
+
+            raise IOError(
+                89,  # errno.EDESTADDRREQ : Destination address required
+                "Don't know what to do with relative path in {0}, see "
+                "above error message for".format(dist_record),
+                rel_src,
             )
 
         # At this point the file should be <pkg-name>/..., so we put
@@ -485,6 +595,33 @@ def _cmd(context, command):
 
     if p.returncode:
         raise BuildError("Failed to download source with pip: %s" % cmd_str)
+
+
+def _check_found(py_exe, version_text, log_invalid=True):
+    """Check the Python and pip version text found.
+
+    Args:
+        py_exe (str or None): Python executable path found, if any.
+        version_text (str or None): Pip version found, if any.
+        log_invalid (bool): Whether to log messages if found invalid.
+
+    Returns:
+        bool: Python is OK and pip version fits against ``PIP_SPECIFIER``.
+    """
+    is_valid = True
+    message = "Needs pip%s, but found '%s' for Python '%s'"
+
+    if version_text is None or not py_exe:
+        is_valid = False
+        if log_invalid:
+            print_debug(message, PIP_SPECIFIER, version_text, py_exe)
+
+    elif PackagingVersion(version_text) not in PIP_SPECIFIER:
+        is_valid = False
+        if log_invalid:
+            print_warning(message, PIP_SPECIFIER, version_text, py_exe)
+
+    return is_valid
 
 
 _verbose = config.debug("package_release")

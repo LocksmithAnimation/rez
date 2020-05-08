@@ -2,8 +2,9 @@ from rez.config import config
 from rez.resolved_context import ResolvedContext
 from rez.packages import get_latest_package_from_string, Variant
 from rez.exceptions import RezError, PackageNotFoundError, PackageTestError
+from rez.utils.data_utils import RO_AttrDictWrapper
 from rez.utils.colorize import heading, Printer
-from rez.utils.logging_ import print_info, print_warning, print_error
+from rez.utils.logging_ import print_info, print_warning, print_error, print_debug
 from rez.vendor.six import six
 from rez.vendor.version.requirement import Requirement, RequirementList
 from pipes import quote
@@ -288,6 +289,18 @@ class PackageTestRunner(object):
             requires = test_info["requires"]
             on_variants = test_info["on_variants"]
 
+            # show progress
+            if self.verbose > 1:
+                self._print_header(
+                    "\nRunning test: %s\nPackage: %s\n%s\n",
+                    test_name, variant.uri, '-' * 80
+                )
+            elif self.verbose:
+                self._print_header(
+                    "\nRunning test: %s\n%s\n",
+                    test_name, '-' * 80
+                )
+
             # apply variant selection filter if specified
             if isinstance(on_variants, dict):
                 filter_type = on_variants["type"]
@@ -310,18 +323,6 @@ class PackageTestRunner(object):
                     )
 
                     continue
-
-            # show progress
-            if self.verbose > 1:
-                self._print_header(
-                    "\nRunning test: %s\nPackage: %s\n%s\n",
-                    test_name, variant.uri, '-' * 80
-                )
-            elif self.verbose:
-                self._print_header(
-                    "\nRunning test: %s\n%s\n",
-                    test_name, '-' * 80
-                )
 
             # add requirements to force the current variant to be resolved.
             # TODO this is not perfect, and will need to be updated when
@@ -412,14 +413,32 @@ class PackageTestRunner(object):
                 )
                 continue
 
+            def _pre_test_commands(executor):
+                # run package.py:pre_test_commands() if present
+                pre_test_commands = getattr(variant, "pre_test_commands")
+                if not pre_test_commands:
+                    return
+
+                test_ns = {
+                    "name": test_name
+                }
+
+                with executor.reset_globals():
+                    executor.bind("this", variant)
+                    executor.bind("test", RO_AttrDictWrapper(test_ns))
+                    executor.execute_code(pre_test_commands)
+
             retcode, _, _ = context.execute_shell(
                 command=command,
+                actions_callback=_pre_test_commands,
                 stdout=self.stdout,
                 stderr=self.stderr,
                 block=True
             )
 
             if retcode:
+                print_warning("Test command exited with code %d", retcode)
+
                 self._add_test_result(
                     test_name,
                     variant,
@@ -469,9 +488,10 @@ class PackageTestRunner(object):
         Only run test on variants whose direct requirements are a subset of, and
         do not conflict with, the list given in 'value' param.
 
-        For example, if on_variants.requires is ['foo', 'bah'] then only variants
+        For example, if on_variants.value is ['foo', 'bah'] then only variants
         containing both these requirements will be selected; ['!foo', 'bah'] would
-        select those variants with bah present and not foo.
+        select those variants with bah present and not foo; ['!foo'] would
+        select all variants without foo present.
         """
         requires_filter = params["value"]
 
@@ -480,13 +500,12 @@ class PackageTestRunner(object):
         if reqlist.conflict:
             return False
 
-        # test if variant requires is a subset of given requires filter.
-        # This works because RequirementList merges requirements.
+        # If the combined requirements, minus conflict requests, is equal to the
+        # variant's requirements, then this variant is selected.
         #
-        if RequirementList(variant.variant_requires) != reqlist:
-            return False
-
-        return True
+        reqs1 = RequirementList(x for x in reqlist if not x.conflict)
+        reqs2 = RequirementList(x for x in variant.variant_requires if not x.conflict)
+        return (reqs1 == reqs2)
 
     def _get_test_info(self, test_name, variant):
         tests_dict = variant.tests or {}

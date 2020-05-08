@@ -1,5 +1,91 @@
 # Change Log
 
+## 2.59.0 (2020-04-30)
+[Source](https://github.com/nerdvegas/rez/tree/2.59.0) | [Diff](https://github.com/nerdvegas/rez/compare/2.58.1...2.59.0)
+
+**Merged pull requests:**
+
+- Fix issue 826 - correct python and pip fallback [\#878](https://github.com/nerdvegas/rez/pull/878) ([j0yu](https://github.com/j0yu))
+
+**Closed issues:**
+
+- rez-pip issues finding pip executable [\#826](https://github.com/nerdvegas/rez/issues/826)
+
+## 2.58.1 (2020-04-22)
+[Source](https://github.com/nerdvegas/rez/tree/2.58.1) | [Diff](https://github.com/nerdvegas/rez/compare/2.58.0...2.58.1)
+
+**Merged pull requests:**
+
+- Fix ISSUE-879: AttributeError: 'Namespace' object has no attribute 'func' [\#880](https://github.com/nerdvegas/rez/pull/880) ([rfletchr](https://github.com/rfletchr))
+
+**Closed issues:**
+
+- AttributeError: 'Namespace' object has no attribute 'func' [\#879](https://github.com/nerdvegas/rez/issues/879)
+
+## 2.58.0 (2020-04-15)
+[Source](https://github.com/nerdvegas/rez/tree/2.58.0) | [Diff](https://github.com/nerdvegas/rez/compare/2.57.0...2.58.0)
+
+**Merged pull requests:**
+
+- Expose package orderers in rez config [\#868](https://github.com/nerdvegas/rez/pull/868) ([rlessardrodeofx](https://github.com/rlessardrodeofx))
+
+**Closed issues:**
+
+- add configurability of package orderers [\#329](https://github.com/nerdvegas/rez/issues/329)
+
+## 2.57.0 (2020-04-14)
+[Source](https://github.com/nerdvegas/rez/tree/2.57.0) | [Diff](https://github.com/nerdvegas/rez/compare/2.56.2...2.57.0)
+
+**Merged pull requests:**
+
+- Added distribution author and help information [\#873](https://github.com/nerdvegas/rez/pull/873) ([ColinKennedy](https://github.com/ColinKennedy))
+
+**Closed issues:**
+
+- rez-pip - Add help / authors attributes [\#838](https://github.com/nerdvegas/rez/issues/838)
+
+## 2.56.2 (2020-04-14)
+[Source](https://github.com/nerdvegas/rez/tree/2.56.2) | [Diff](https://github.com/nerdvegas/rez/compare/2.56.1...2.56.2)
+
+**Merged pull requests:**
+
+- Fix for git rev-parse error out before checking for allow_no_upstream [\#872](https://github.com/nerdvegas/rez/pull/872) ([alexxbb](https://github.com/alexxbb))
+
+**Closed issues:**
+
+- override git plugin config in package.py [\#871](https://github.com/nerdvegas/rez/issues/871)
+
+## 2.56.1 (2020-03-31)
+[Source](https://github.com/nerdvegas/rez/tree/2.56.1) | [Diff](https://github.com/nerdvegas/rez/compare/2.56.0...2.56.1)
+
+**Merged pull requests:**
+
+- Log during pip install [\#867](https://github.com/nerdvegas/rez/pull/867) ([j0yu](https://github.com/j0yu))
+
+## 2.56.0 (2020-03-31)
+[Source](https://github.com/nerdvegas/rez/tree/2.56.0) | [Diff](https://github.com/nerdvegas/rez/compare/2.55.0...2.56.0)
+
+**Merged pull requests:**
+
+- pip install path remap [\#866](https://github.com/nerdvegas/rez/pull/866) ([j0yu](https://github.com/j0yu))
+
+**Closed issues:**
+
+- rez-pip - no case for ../../include/... file [\#861](https://github.com/nerdvegas/rez/issues/861)
+
+## 2.55.0 (2020-03-21)
+[Source](https://github.com/nerdvegas/rez/tree/2.55.0) | [Diff](https://github.com/nerdvegas/rez/compare/2.54.0...2.55.0)
+
+**Merged pull requests:**
+
+- Fixed bug in test variant selection [\#842](https://github.com/nerdvegas/rez/pull/842) ([nerdvegas](https://github.com/nerdvegas))
+- pre_test_commands [\#844](https://github.com/nerdvegas/rez/pull/844) ([nerdvegas](https://github.com/nerdvegas))
+
+**Closed issues:**
+
+- tests "on_variants" not working as expected in some cases [\#841](https://github.com/nerdvegas/rez/issues/841)
+- pre_test_commands [\#843](https://github.com/nerdvegas/rez/issues/843)
+
 ## 2.54.0 (2020-02-20)
 [Source](https://github.com/nerdvegas/rez/tree/2.54.0) | [Diff](https://github.com/nerdvegas/rez/compare/2.53.1...2.54.0)
 
