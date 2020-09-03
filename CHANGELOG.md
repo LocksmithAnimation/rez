@@ -1,5 +1,115 @@
 # Change Log
 
+## 2.67.0 (2020-08-25)
+[Source](https://github.com/nerdvegas/rez/tree/2.67.0) | [Diff](https://github.com/nerdvegas/rez/compare/2.66.1...2.67.0)
+
+**Merged pull requests:**
+
+- Ninja support [\#940](https://github.com/nerdvegas/rez/pull/940) ([bareya](https://github.com/bareya))
+- print warning once if pkg cache dir not present [\#942](https://github.com/nerdvegas/rez/pull/942) ([nerdvegas](https://github.com/nerdvegas))
+
+**Closed issues:**
+
+- don't raise on missing package cache dir [\#941](https://github.com/nerdvegas/rez/issues/941)
+
+## 2.66.1 (2020-08-25)
+[Source](https://github.com/nerdvegas/rez/tree/2.66.1) | [Diff](https://github.com/nerdvegas/rez/compare/2.66.0...2.66.1)
+
+**Merged pull requests:**
+
+- Fix #934, no hash string in include script file name [\#935](https://github.com/nerdvegas/rez/pull/935) ([davidlatwe](https://github.com/davidlatwe))
+- Raise unversioned error when config not allowed [\#938](https://github.com/nerdvegas/rez/pull/938) ([davidlatwe](https://github.com/davidlatwe))
+
+**Closed issues:**
+
+- Installed package not including latest module [\#934](https://github.com/nerdvegas/rez/issues/934)
+
+## 2.66.0 (2020-08-11)
+[Source](https://github.com/nerdvegas/rez/tree/2.66.0) | [Diff](https://github.com/nerdvegas/rez/compare/2.65.0...2.66.0)
+
+**Merged pull requests:**
+
+- [docs] Sphinx API hosted on GitHub Pages [\#832](https://github.com/nerdvegas/rez/pull/832) ([j0yu](https://github.com/j0yu))
+
+## 2.65.0 (2020-08-11)
+[Source](https://github.com/nerdvegas/rez/tree/2.65.0) | [Diff](https://github.com/nerdvegas/rez/compare/2.64.0...2.65.0)
+
+**Notes**
+
+This release cleans up the wiki-based doc generation code, and adds a github workflow
+to automatically update the wiki.
+
+**Merged pull requests:**
+
+- [wiki] Move update utils into main repo [\#831](https://github.com/nerdvegas/rez/pull/831) ([j0yu](https://github.com/j0yu))
+
+## 2.64.0 (2020-08-11)
+[Source](https://github.com/nerdvegas/rez/tree/2.64.0) | [Diff](https://github.com/nerdvegas/rez/compare/2.63.0...2.64.0)
+
+**Merged pull requests:**
+
+- added DelayLoad config primitive [\#922](https://github.com/nerdvegas/rez/pull/922) ([nerdvegas](https://github.com/nerdvegas))
+- Sort keys in resolved context JSON [\#923](https://github.com/nerdvegas/rez/pull/923) ([dbr](https://github.com/dbr))
+- Respect sys path order when spawning shell on Windows [\#926](https://github.com/nerdvegas/rez/pull/926) ([davidlatwe](https://github.com/davidlatwe))
+- Fix #927, add encoding=utf-8 on file write [\#928](https://github.com/nerdvegas/rez/pull/928) ([davidlatwe](https://github.com/davidlatwe))
+
+**Closed issues:**
+
+- add 'delay_load' config primitive [\#921](https://github.com/nerdvegas/rez/issues/921)
+- New spawned shell's `PATH` is random ordered on Windows [\#925](https://github.com/nerdvegas/rez/issues/925)
+- Packages that contains Unicode character failed on install/release [\#927](https://github.com/nerdvegas/rez/issues/927)
+
+## 2.63.0 (2020-08-04)
+[Source](https://github.com/nerdvegas/rez/tree/2.63.0) | [Diff](https://github.com/nerdvegas/rez/compare/2.62.0...2.63.0)
+
+**Merged pull requests:**
+
+- don't attempt to update pkg cache on failed resolve [\#916](https://github.com/nerdvegas/rez/pull/916) ([nerdvegas](https://github.com/nerdvegas))
+- fix pkg cache fail on windows, py<=2.7 [\#917](https://github.com/nerdvegas/rez/pull/917) ([nerdvegas](https://github.com/nerdvegas))
+- raise metadata error on bad pkg, rather than build-system-notfound [\#918](https://github.com/nerdvegas/rez/pull/918) ([nerdvegas](https://github.com/nerdvegas))
+- default to disable package caching during build [\#920](https://github.com/nerdvegas/rez/pull/920) ([nerdvegas](https://github.com/nerdvegas))
+
+**Closed issues:**
+
+- rez-packaage-cache issue on conflicting context [\#905](https://github.com/nerdvegas/rez/issues/905)
+- Package caching does not work on windows due to device not being implemented in py2 on Windows [\#912](https://github.com/nerdvegas/rez/issues/912)
+- Miss-leaded error message while building with invalid package metadata [\#915](https://github.com/nerdvegas/rez/issues/915)
+- add ability to disable pkg caching during build [\#919](https://github.com/nerdvegas/rez/issues/919)
+
+## 2.62.0 (2020-07-22)
+[Source](https://github.com/nerdvegas/rez/tree/2.62.0) | [Diff](https://github.com/nerdvegas/rez/compare/2.61.1...2.62.0)
+
+**Merged pull requests:**
+
+- Allow configuration of filesystem lock mechanism [\#903](https://github.com/nerdvegas/rez/pull/903) ([dbr](https://github.com/dbr))
+- make context tracking tolerant of errors [\#911](https://github.com/nerdvegas/rez/pull/911) ([nerdvegas](https://github.com/nerdvegas))
+
+**Closed issues:**
+
+- SSL crash related to context tracking [\#910](https://github.com/nerdvegas/rez/issues/910)
+
+## 2.61.1 (2020-07-10)
+[Source](https://github.com/nerdvegas/rez/tree/2.61.1) | [Diff](https://github.com/nerdvegas/rez/compare/2.61.0...2.61.1)
+
+**Merged pull requests:**
+
+- fix for rez occasionally installed into lib64 dir [\#902](https://github.com/nerdvegas/rez/pull/902) ([nerdvegas](https://github.com/nerdvegas))
+
+**Closed issues:**
+
+- occasional missing rez cli in rez-env [\#901](https://github.com/nerdvegas/rez/issues/901)
+
+## 2.61.0 (2020-07-10)
+[Source](https://github.com/nerdvegas/rez/tree/2.61.0) | [Diff](https://github.com/nerdvegas/rez/compare/2.60.1...2.61.0)
+
+**Notes**
+
+Package caching feature added, see [here](https://github.com/nerdvegas/rez/wiki/Package-Caching).
+
+**Merged pull requests:**
+
+- Package cache [\#893](https://github.com/nerdvegas/rez/pull/893) ([nerdvegas](https://github.com/nerdvegas))
+
 ## 2.60.1 (2020-05-23)
 [Source](https://github.com/nerdvegas/rez/tree/2.60.1) | [Diff](https://github.com/nerdvegas/rez/compare/2.60.0...2.60.1)
 

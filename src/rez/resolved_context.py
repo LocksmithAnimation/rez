@@ -14,6 +14,7 @@ from rez.utils.formatting import columnise, PackageRequest, ENV_VAR_REGEX, \
 from rez.utils.data_utils import deep_del
 from rez.utils.filesystem import TempDirs
 from rez.utils.memcached import pool_memcached_connections
+from rez.utils.logging_ import print_error, print_warning
 from rez.backport.shutilwhich import which
 from rez.rex import RexExecutor, Python, OutputStyle
 from rez.rex_bindings import VersionBinding, VariantBinding, \
@@ -22,9 +23,10 @@ from rez import package_order
 from rez.packages import get_variant, iter_packages
 from rez.package_filter import PackageFilterList
 from rez.package_order import PackageOrderList
+from rez.package_cache import PackageCache
 from rez.shells import create_shell
 from rez.exceptions import ResolvedContextError, PackageCommandError, \
-    RezError, _NeverError
+    RezError, _NeverError, PackageCacheError
 from rez.utils.graph_utils import write_dot, write_compacted, read_graph_from_string
 from rez.vendor.six import six
 from rez.vendor.version.version import VersionRange
@@ -119,11 +121,13 @@ class ResolvedContext(object):
     command within a configured python namespace, without spawning a child
     shell.
     """
-    serialize_version = (4, 4)
+    serialize_version = (4, 5)
     tmpdir_manager = TempDirs(config.context_tmpdir, prefix="rez_context_")
 
     context_tracking_payload = None
     context_tracking_lock = threading.Lock()
+
+    package_cache_present = True
 
     class Callback(object):
         def __init__(self, max_fails, time_limit, callback, buf=None):
@@ -151,7 +155,7 @@ class ResolvedContext(object):
                  package_filter=None, package_orderers=None, max_fails=-1,
                  add_implicit_packages=True, time_limit=-1, callback=None,
                  package_load_callback=None, buf=None, suppress_passive=False,
-                 print_stats=False):
+                 print_stats=False, package_caching=None):
         """Perform a package resolve, and store the result.
 
         Args:
@@ -186,7 +190,10 @@ class ResolvedContext(object):
             suppress_passive (bool): If True, don't print debugging info that
                 has had no effect on the solve. This argument only has an
                 effect if `verbosity` > 2.
-            print_stats (bool): If true, print advanced solver stats at the end.
+            print_stats (bool): If True, print advanced solver stats at the end.
+            package_caching (bool|None): If True, apply package caching settings
+                as per the config. If None, enable as determined by config
+                setting 'package_cache_during_build'.
         """
         self.load_path = None
 
@@ -222,6 +229,14 @@ class ResolvedContext(object):
 
         # settings that affect context execution
         self.append_sys_path = True
+
+        if package_caching is None:
+            if building:
+                package_caching = config.package_cache_during_build
+            else:
+                package_caching = True
+
+        self.package_caching = package_caching
 
         # patch settings
         self.default_patch_lock = PatchLock.no_lock
@@ -307,6 +322,9 @@ class ResolvedContext(object):
         if config.context_tracking_host:
             data = self.to_dict(fields=config.context_tracking_context_fields)
             self._track_context(data, action="created")
+
+        # update package cache
+        self._update_package_cache()
 
     def __str__(self):
         request = self.requested_packages(include_implicit=True)
@@ -550,7 +568,8 @@ class ResolvedContext(object):
         if config.rxt_as_yaml:
             content = dump_yaml(doc)
         else:
-            content = json.dumps(doc, indent=4, separators=(",", ": "))
+            content = json.dumps(doc, indent=4, separators=(",", ": "),
+                                 sort_keys=True)
 
         buf.write(content)
 
@@ -566,6 +585,20 @@ class ResolvedContext(object):
             return None
 
         return cls.load(filepath)
+
+    def is_current(self):
+        """
+        Returns:
+            bool: True if this is the currently sourced context, False otherwise.
+        """
+        if not self.load_path:
+            return False
+
+        filepath = os.getenv("REZ_RXT_FILE")
+        if not filepath or not os.path.exists(filepath):
+            return None
+
+        return (self.load_path == filepath)
 
     @classmethod
     def load(cls, path):
@@ -753,17 +786,32 @@ class ResolvedContext(object):
         if not source_order:
             resolved_packages = sorted(resolved_packages, key=lambda x: x.name)
 
+        is_current = self.is_current()
+
         for pkg in resolved_packages:
             t = []
             col = None
             location = None
 
+            # check for retargeted variant root (ie package caching)
+            pkg_root = pkg.root
+
+            if is_current:
+                uname = pkg.name.upper().replace('.', '_')
+                prefix = "REZ_" + uname
+                if os.getenv(prefix + "_ORIG_ROOT"):
+                    pkg_root = os.getenv(
+                        prefix + "_ROOT",  # will point to cache
+                        pkg.root  # in case some joker deletes the env-var!
+                    )
+                    t.append("cached")
+
             # print root/uri
             if show_resolved_uris or not pkg.root:
                 location = pkg.uri
             else:
-                location = pkg.root
-                if not os.path.exists(pkg.root):
+                location = pkg_root
+                if not os.path.exists(pkg_root):
                     t.append('NOT FOUND')
                     col = critical
 
@@ -1361,6 +1409,7 @@ class ResolvedContext(object):
             package_paths=self.package_paths,
 
             append_sys_path=self.append_sys_path,
+            package_caching=self.package_caching,
 
             default_patch_lock=self.default_patch_lock.name,
 
@@ -1503,6 +1552,10 @@ class ResolvedContext(object):
 
         r.append_sys_path = d.get("append_sys_path", True)
 
+        # -- SINCE SERIALIZE VERSION 4.5
+
+        r.package_caching = d.get("package_caching", True)
+
         # <END SERIALIZATION>
 
         # track context usage
@@ -1512,7 +1565,39 @@ class ResolvedContext(object):
 
             r._track_context(data, action="sourced")
 
+        # update package cache
+        r._update_package_cache()
+
         return r
+
+    @classmethod
+    def _get_package_cache(cls):
+        if not cls.package_cache_present:
+            return None
+
+        try:
+            return PackageCache(config.cache_packages_path)
+        except PackageCacheError:
+            print_warning(
+                "Package caching disabled (dir %s does not exist)",
+                config.cache_packages_path
+            )
+            cls.package_cache_present = False
+
+    def _update_package_cache(self):
+        if not self.package_caching or \
+                not config.cache_packages_path or \
+                not config.write_package_cache or \
+                not self.success:
+            return
+
+        # see PackageCache.add_variants_async
+        if not system.is_production_rez_install:
+            return
+
+        pkgcache = self._get_package_cache()
+        if pkgcache:
+            pkgcache.add_variants_async(self.resolved_packages)
 
     @classmethod
     def _init_context_tracking_payload_base(cls):
@@ -1540,8 +1625,6 @@ class ResolvedContext(object):
                 cls.context_tracking_payload = data
 
     def _track_context(self, context_data, action):
-        from rez.utils.amqp import publish_message
-
         # create message payload
         data = {
             "action": action,
@@ -1555,13 +1638,21 @@ class ResolvedContext(object):
         routing_key = (config.context_tracking_amqp["exchange_routing_key"] +
                        '.' + action.upper())
 
-        publish_message(
-            host=config.context_tracking_host,
-            amqp_settings=config.context_tracking_amqp,
-            routing_key=routing_key,
-            data=data,
-            block=False
-        )
+        try:
+            from rez.utils.amqp import publish_message
+
+            publish_message(
+                host=config.context_tracking_host,
+                amqp_settings=config.context_tracking_amqp,
+                routing_key=routing_key,
+                data=data,
+                block=False
+            )
+        except Exception as e:
+            print_error(
+                "Context tracking failed: %s: %s",
+                e.__class__.__name__, e
+            )
 
     @classmethod
     def _read_from_buffer(cls, buf, identifier_str=None):
@@ -1658,6 +1749,20 @@ class ResolvedContext(object):
         # raised on bad commands code, not a SourceCodeError
         exc_type = SourceCodeError if config.catch_rex_errors else _NeverError
 
+        # retarget variant roots wrt package caching
+        pkg_roots = {}
+
+        if self.package_caching and \
+                config.cache_packages_path and \
+                config.read_package_cache:
+
+            pkgcache = self._get_package_cache()
+            if pkgcache:
+                for pkg in resolved_pkgs:
+                    cached_root = pkgcache.get_cached_root(pkg)
+                    if cached_root:
+                        pkg_roots[pkg.name] = cached_root
+
         # set basic package variables and create per-package bindings
         bindings = {}
         for pkg in resolved_pkgs:
@@ -1671,9 +1776,16 @@ class ResolvedContext(object):
             executor.setenv(prefix + "_MAJOR_VERSION", major_version)
             executor.setenv(prefix + "_MINOR_VERSION", minor_version)
             executor.setenv(prefix + "_PATCH_VERSION", patch_version)
-
             executor.setenv(prefix + "_BASE", pkg.base)
-            executor.setenv(prefix + "_ROOT", pkg.root)
+
+            pkg_root = pkg_roots.get(pkg.name)
+            if pkg_root:
+                executor.setenv(prefix + "_ROOT", pkg_root)
+                # store extra var to indicate that root retarget occurred
+                executor.setenv(prefix + "_ORIG_ROOT", pkg.root)
+            else:
+                executor.setenv(prefix + "_ROOT", pkg.root)
+
             bindings[pkg.name] = dict(version=VersionBinding(pkg.version),
                                       variant=VariantBinding(pkg))
 
@@ -1692,7 +1804,7 @@ class ResolvedContext(object):
                 bindings_ = bindings[pkg.name]
                 executor.bind('this',       bindings_["variant"])
                 executor.bind("version",    bindings_["version"])
-                executor.bind('root',       pkg.root)
+                executor.bind('root',       pkg_roots.get(pkg.name, pkg.root))
                 executor.bind('base',       pkg.base)
 
                 exc = None
